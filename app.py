@@ -5,7 +5,7 @@
 - 患者唯一键 = oneid + 开票抬头（两者皆空时回退 会员号 / 会员姓名）
 - 首次购药时间 = 每个患者最小的 销售时间
 - 当月新患 = 首次购药时间落在该统计月的患者数
-- YTD 老患 = 首次购药时间落在 [YTD开始日, 上月末] 的累计患者数（= 截至上月底累计池，不要求当月复购）
+- YTD 老患 = 自 YTD 开始日起窗口内有购药记录的患者滚动累积（不再卡首购月，首购早但期内复购者从复购月起入池）；当月新患 = 全局首购月 == 当月；YTD老患 = 累计患者 - 当月新患。
 - 城市 = 药房名称前 2 字
 - 适应症 = 每个患者末次(最近)购药的适应症，经清洗映射表归到标准适应症
 - 分布图当月患者 = 当月有销售记录的患者（按末次购药时的药房/适应症归类）
@@ -86,18 +86,32 @@ def build_patient_table(df):
 
 
 # ------------------------- 患者池累计 -------------------------
-def patient_pool(pt, ytd_start, disp_start, disp_end):
+def patient_pool(d_keyed, pt, ytd_start, disp_start, disp_end):
+    """患者池累计（v2.10 口径，按用户纠正）：
+    - 累积患者 = 自 YTD 开始日起，截至当月，窗口内「有购药记录」的去重患者滚动累积。
+      入选条件不再卡首购月（首购早于 YTD、但期内复购的患者，从复购月起即入池）。
+      断药的历史患者仍留在累计池（他曾在窗口内购药）。
+    - 当月新患 = 全局首购月 == 当月。
+    - YTD老患 = 累计患者 - 当月新患（= 当月活跃患者数 - 当月新患）。"""
     ytd_start_ts = pd.Timestamp(ytd_start).to_period("M").to_timestamp()
-    # 累计从 YTD 开始日算，展示窗口仅用于切片
     all_months = pd.period_range(ytd_start_ts, pd.Timestamp(disp_end), freq="M").to_timestamp()
-    fp = pt[pt["首购月"] >= ytd_start_ts]
-    cnt_by_month = fp.groupby("首购月").size()
-    rows, cum = [], 0
+    dk = d_keyed[d_keyed["销售时间"] >= ytd_start_ts].copy()
+    dk["月"] = dk["销售时间"].dt.to_period("M").dt.to_timestamp()
+    first_month = pt.set_index("key")["首购月"]
+    rows = []
+    cum_set = set()
     for m in all_months:
-        new = int(cnt_by_month.get(m, 0))
-        old = cum
-        cum = old + new
-        rows.append({"月份": m, "YTD老患": old, "当月新患": new, "累计患者": cum})
+        active = set(dk.loc[dk["月"] == m, "key"].unique())
+        new = {k for k in active if first_month.get(k) == m}
+        cum_set |= active
+        rows.append({
+            "月份": m,
+            "当月活跃患者": len(active),
+            "当月新患": len(new),
+            "当月老患(复购)": len(active) - len(new),
+            "YTD老患": len(cum_set) - len(new),
+            "累计患者": len(cum_set),
+        })
     out = pd.DataFrame(rows)
     out = out[(out["月份"] >= pd.Timestamp(disp_start)) & (out["月份"] <= pd.Timestamp(disp_end))]
     return out
@@ -1045,7 +1059,7 @@ def main():
     with st.spinner("计算患者维度…"):
         d_keyed, pt = build_patient_table(df)
         _, pt_all = build_patient_table(df_all)  # 全局患者表：单药房Tab的新/老患按全局首次购药判定
-        pool = patient_pool(pt, ytd_start, disp_start, disp_end)
+        pool = patient_pool(d_keyed, pt, ytd_start, disp_start, disp_end)
         pharm = pharmacy_dist(d_keyed, target_month)
         ind_counts, unmapped = indication_dist(d_keyed, pt, target_month, effective_mapping)
         std_qty = std_qty_from_map(mp_df)
@@ -1130,7 +1144,7 @@ def main():
     with tab_pool:
         # ---- 患者池累计 堆叠柱状图 ----
         st.subheader("患者池累计情况")
-        st.caption("YTD 老患 = 截至上月底累计患者（首次购药落在 YTD 开始日之后、上月之前）；当月新患 = 首次购药落在该月。柱状图逐月累积。")
+        st.caption("累计患者 = 自 YTD 开始日起窗口内有购药记录的患者滚动累积（首购早但期内复购者从复购月起入池）；YTD老患 = 累计患者 − 当月新患；当月新患 = 全局首购月 == 当月。柱状图逐月累积。")
         if len(pool):
             fig = go.Figure()
             fig.add_bar(x=pool["月份"], y=pool["YTD老患"], name="YTD老患", marker_color="#1f4e79",
@@ -1141,10 +1155,33 @@ def main():
                               xaxis_tickformat="%Y-%m", yaxis_title="患者数")
             fig.update_traces(texttemplate="%{text}", textfont_size=10)
             st.plotly_chart(fig, width="stretch")
-            # 下载：患者池累计（月份/老患/新患/累计）
+            # 下载：患者池累计（月份/活跃/新患/复购/老患/累计）
             pool_dl = pool.copy()
             pool_dl["月份"] = pool_dl["月份"].dt.strftime("%Y-%m")
-            _download_csv(pool_dl, "患者池累计.csv", "⬇ 下载患者池累计数据（月份/老患/新患/累计）", "dl_pool")
+            _download_csv(pool_dl, "患者池累计.csv",
+                          "⬇ 下载患者池累计数据（月份/活跃/新患/复购/老患/累计）", "dl_pool")
+
+            # ---- 整体患者趋势：累计线 + 当月活跃堆叠柱 ----
+            st.subheader("整体患者趋势")
+            st.caption("累计患者（红线）= 自 YTD 起滚动累积池（含断药患者，持续走高）；"
+                       "当月活跃患者（柱）= 当月实际有购药的患者，即真实月度销售基数，"
+                       "由【当月新患 + 当月复购老患】堆叠。柱高反映真实当月业务，线反映盘子规模。")
+            ft = go.Figure()
+            ft.add_bar(x=pool["月份"], y=pool["当月新患"], name="当月新患",
+                       marker_color="#9dc3e6", text=pool["当月新患"],
+                       textposition="outside")
+            ft.add_bar(x=pool["月份"], y=pool["当月老患(复购)"], name="当月复购老患",
+                       marker_color="#1f4e79", text=pool["当月老患(复购)"],
+                       textposition="inside", insidetextanchor="middle")
+            ft.add_trace(go.Scatter(
+                x=pool["月份"], y=pool["累计患者"], name="累计患者",
+                mode="lines+markers", line=dict(color="#c00000", width=3)))
+            ft.update_layout(
+                barmode="stack", height=460, xaxis_tickformat="%Y-%m",
+                yaxis_title="患者数",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0))
+            ft.update_traces(texttemplate="%{text}", textfont_size=10)
+            st.plotly_chart(ft, width="stretch")
         else:
             st.warning("当前时间筛选无数据，请调整 YTD 开始日或展示区间。")
 
@@ -1228,7 +1265,9 @@ def main():
             _top_ind = ind_counts.sort_values(ascending=False).head(1)
             _summary_box(
                 f"截至 {_last['月份'].strftime('%Y-%m')}，累计患者 {int(_last['累计患者'])} 人"
-                f"（当月新患 {int(_last['当月新患'])}、YTD 老患 {int(_last['YTD老患'])}）。"
+                f"（当月活跃 {int(_last['当月活跃患者'])}、新患 {int(_last['当月新患'])}、"
+                f"复购老患 {int(_last['当月老患(复购)'])}）。"
+                f"累计线持续走高（含历史断药患者），活跃柱反映真实当月业务基数；"
                 f"当月药房分布 Top1：{_top_pharm.index[0]}（{int(_top_pharm.iloc[0])} 人）；"
                 f"适应症分布 Top1：{_top_ind.index[0]}（{int(_top_ind.iloc[0])} 人）。"
             )
