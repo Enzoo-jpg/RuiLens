@@ -1,0 +1,28 @@
+# 数据文件（含患者隐私：电话/姓名/oneid），严禁提交
+*.xlsx
+*.xls
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 本地日志
+pip_log*.txt
+pip_*.txt
+app_test_out.txt
+*.log
+
+# 测试 / 临时脚本（本地验证用，不发布）
+test_*.py
+verify_*.py
+__test_func.py
+app_test.py
+__pycache__/
+
+# 项目内存目录（不发布）
+.workbuddy/
+
+# 环境变量 / 密钥
+.env
