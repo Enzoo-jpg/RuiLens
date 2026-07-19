@@ -508,10 +508,10 @@ def single_pharmacy_np(d_pharm, pt_all, m_start, m_end, mapping):
     return g
 
 
-def single_pharmacy_treatment_rate(d_pharm, pt_all, m_start, m_end, mapping, std_qty):
-    """单药房逐月规范治疗率（分适应症），口径同 treatment_rate 但仅限该药房患者：
-    去除计算月新患（首购早于当月1日且在该药房有购药），看当月产生购药的患者里，
-    既往历史（<=目标月末）购药盒数总和是否达到该适应症标准规范治疗量。
+def single_pharmacy_treatment_rate(d_pharm, d_all, pt_all, m_start, m_end, mapping, std_qty):
+    """单药房逐月规范治疗率（分适应症）：患者候选限定在该药房购药者，但累计盒数按全体系(所有药房合并)计算。
+    口径对齐患者池全量 treatment_rate：去除计算月新患（首购早于当月1日且在该药房有购药），
+    看这些患者截至目标月末的【全体系】累计净购药盒数是否达到该适应症标准规范治疗量。
     返回长表 [月份, 适应症, 老患者数, 达标患者数, 未达标患者数, 达标率]。"""
     pharm_keys = pd.Index(d_pharm["key"].unique())
     months = pd.period_range(
@@ -521,13 +521,14 @@ def single_pharmacy_treatment_rate(d_pharm, pt_all, m_start, m_end, mapping, std
     recs = []
     for m in months:
         t_start, t_end = _month_bounds(m)
-        d_sub = d_pharm[d_pharm["销售时间"] <= t_end]
+        # 全体系累计盒数（所有药房合并），对齐患者池全量口径
+        d_all_sub = d_all[d_all["销售时间"] <= t_end]
+        cum = d_all_sub.groupby("key")["销售数量"].sum()
         old_pt = pt_all[
             pt_all["key"].isin(pharm_keys) & (pt_all["首次购药时间"] < t_start)
         ].copy()
         if len(old_pt) == 0:
             continue
-        cum = d_sub.groupby("key")["销售数量"].sum()
         old_pt["累计盒数"] = old_pt["key"].map(cum).fillna(0)
         old_pt["适应症"] = _clean_indication(old_pt["末次适应症"], mapping)
         for ind, g in old_pt.groupby("适应症"):
@@ -1432,8 +1433,17 @@ def main():
                 d_pharm, pt_all, sel_single, sp_start, sp_end, effective_mapping)
             np_df2 = single_pharmacy_np(d_pharm, pt_all, sp_start, sp_end, effective_mapping)
             dot_df2 = r12m_dot(d_pharm, pt_all, sp_start, sp_end, effective_mapping)
+            # 构造全体系带 key 全量（受侧边栏药房筛选外的全部数据），供规范治疗率按全体系累计
+            d_all_keyed = df_all.copy()
+            d_all_keyed["key"] = [
+                make_key(o, t, m, n) for o, t, m, n in zip(
+                    d_all_keyed["oneid"], d_all_keyed["开票抬头"],
+                    d_all_keyed["会员号"], d_all_keyed["会员姓名"])
+            ]
+            d_all_keyed = d_all_keyed[d_all_keyed["key"].notna()].copy()
+            d_all_keyed["销售数量"] = pd.to_numeric(d_all_keyed["销售数量"], errors="coerce").fillna(0)
             rate_df2 = single_pharmacy_treatment_rate(
-                d_pharm, pt_all, sp_start, sp_end, effective_mapping, std_qty)
+                d_pharm, d_all_keyed, pt_all, sp_start, sp_end, effective_mapping, std_qty)
 
             # ---- 图1：适应症分布（堆叠柱）----
             st.subheader(f"{sel_single} · 适应症分布（每月患者数）")
@@ -1507,6 +1517,8 @@ def main():
 
             # 图5：规范治疗率（按适应症，subplots：达标/未达标人数柱 + 达标率折线）
             st.markdown("**规范治疗率（按适应症：达标/未达标人数 + 达标率）**")
+            st.caption("患者为该药房购药者；累计购药盒数按全体系（所有药房合并）计算，"
+                       "达标口径与「患者池」Tab 一致，避免单药房累计偏低。")
             if len(rate_df2):
                 _rate_inds = [c for c in _IND_ORDER if c in rate_df2["适应症"].unique()]
                 if _rate_inds:
