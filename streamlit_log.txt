@@ -1,0 +1,49 @@
+
+Collecting usage statistics. To deactivate, set browser.gatherUsageStats to false.
+
+2026-07-19 14:46:29.226 Uvicorn server started on :::8501
+
+  You can now view your Streamlit app in your browser.
+
+  Local URL: http://localhost:8501
+  Network URL: http://192.168.10.123:8501
+  External URL: http://183.222.21.152:8501
+
+2026-07-19 14:47:07.489 The widget with key "ytd_y" was created with a default value but also had its value set via the Session State API.
+Stack (most recent call last):
+  File "C:\Users\Lenovo\.workbuddy\binaries\python\versions\3.13.12\Lib\threading.py", line 1015, in _bootstrap
+    self._bootstrap_inner()
+  File "C:\Users\Lenovo\.workbuddy\binaries\python\versions\3.13.12\Lib\threading.py", line 1044, in _bootstrap_inner
+    self.run()
+  File "C:\Users\Lenovo\.workbuddy\binaries\python\versions\3.13.12\Lib\threading.py", line 995, in run
+    self._target(*self._args, **self._kwargs)
+  File "C:\Users\Lenovo\.workbuddy\binaries\python\envs\default\Lib\site-packages\streamlit\runtime\scriptrunner\script_runner.py", line 418, in _run_script_thread
+    self._run_script(request.rerun_data)
+  File "C:\Users\Lenovo\.workbuddy\binaries\python\envs\default\Lib\site-packages\streamlit\runtime\scriptrunner\script_runner.py", line 820, in _run_script
+    ) = exec_func_with_error_handling(code_to_exec, ctx)
+  File "C:\Users\Lenovo\.workbuddy\binaries\python\envs\default\Lib\site-packages\streamlit\runtime\scriptrunner\exec_code.py", line 129, in exec_func_with_error_handling
+    result = func()
+  File "C:\Users\Lenovo\.workbuddy\binaries\python\envs\default\Lib\site-packages\streamlit\runtime\scriptrunner\script_runner.py", line 795, in code_to_exec
+    exec(code, module.__dict__)  # noqa: S102
+  File "C:\Users\Lenovo\WorkBuddy\2026-07-19-12-23-12\app.py", line 700, in <module>
+    main()
+  File "C:\Users\Lenovo\WorkBuddy\2026-07-19-12-23-12\app.py", line 395, in main
+    ytd_start = _ym_selector("YTD 开始年月", "ytd_y", "ytd_m", date(2024, 1, 1))
+  File "C:\Users\Lenovo\WorkBuddy\2026-07-19-12-23-12\app.py", line 381, in _ym_selector
+    y = st.selectbox("年", _yrs, index=_yrs.index(st.session_state[ykey]), key=ykey)
+  File "C:\Users\Lenovo\.workbuddy\binaries\python\envs\default\Lib\site-packages\streamlit\runtime\metrics_util.py", line 568, in wrapped_func
+    result = non_optional_func(*args, **kwargs)
+  File "C:\Users\Lenovo\.workbuddy\binaries\python\envs\default\Lib\site-packages\streamlit\elements\widgets\selectbox.py", line 576, in selectbox
+    return self._selectbox(
+  File "C:\Users\Lenovo\.workbuddy\binaries\python\envs\default\Lib\site-packages\streamlit\elements\widgets\selectbox.py", line 621, in _selectbox
+    check_widget_policies(
+  File "C:\Users\Lenovo\.workbuddy\binaries\python\envs\default\Lib\site-packages\streamlit\elements\lib\policies.py", line 143, in check_widget_policies
+    check_session_state_rules(
+  File "C:\Users\Lenovo\.workbuddy\binaries\python\envs\default\Lib\site-packages\streamlit\elements\lib\policies.py", line 89, in check_session_state_rules
+    _LOGGER.warning(
+C:\Users\Lenovo\.workbuddy\binaries\python\envs\default\Lib\site-packages\openpyxl\styles\stylesheet.py:237: UserWarning: Workbook contains no default style, apply openpyxl's default
+  warn("Workbook contains no default style, apply openpyxl's default")
+C:\Users\Lenovo\.workbuddy\binaries\python\envs\default\Lib\site-packages\openpyxl\styles\stylesheet.py:237: UserWarning: Workbook contains no default style, apply openpyxl's default
+  warn("Workbook contains no default style, apply openpyxl's default")
+C:\Users\Lenovo\.workbuddy\binaries\python\envs\default\Lib\site-packages\openpyxl\styles\stylesheet.py:237: UserWarning: Workbook contains no default style, apply openpyxl's default
+  warn("Workbook contains no default style, apply openpyxl's default")
