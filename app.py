@@ -1,5 +1,5 @@
 """
-艾伯维乌帕替尼(瑞福) DTP 销售 - 患者池分析看板 (v2.2)
+瑞视 · 乌帕替尼(瑞福) DTP 销售运营看板 (RuiLens v2.9)
 ==================================================
 已确认口径：
 - 患者唯一键 = oneid + 开票抬头（两者皆空时回退 会员号 / 会员姓名）
@@ -34,6 +34,21 @@ def load_data(uploaded_file, path):
     df.columns = [str(c).strip() for c in df.columns]
     df["销售时间"] = pd.to_datetime(df["销售时间"], errors="coerce")
     return df
+
+
+# ------------------------- 隐私列剔除 -------------------------
+# 直接标识符列（电话/姓名/会员号）不参与任何计算，仅用于 make_key 兜底；
+# 置空后内存中不再含敏感值，且 make_key 调用不会因列缺失而报错。
+PII_DROP_SUBSTRINGS = ["电话", "姓名", "会员号"]
+
+
+def strip_pii_columns(df):
+    """将直接标识符列（电话/姓名/会员号）置空，返回 (df, 被剔除的列名列表)。
+    列名保留（值为 NA），以保证 make_key 兜底逻辑可用且不破坏索引。"""
+    dropped = [c for c in df.columns if any(s in c for s in PII_DROP_SUBSTRINGS)]
+    for c in dropped:
+        df[c] = pd.NA
+    return df, dropped
 
 
 # ------------------------- 患者键 -------------------------
@@ -918,8 +933,9 @@ def _download_all_xlsx(pool, pharm_df, ind_df, unmapped, web_map_df, kpi_dict,
 
 # ------------------------- 主程序 -------------------------
 def main():
-    st.set_page_config(page_title="乌帕替尼 患者池分析看板", layout="wide")
-    st.title("艾伯维 · 乌帕替尼(瑞福) 患者池分析看板")
+    st.set_page_config(page_title="瑞视 · 乌帕替尼 DTP 运营看板", layout="wide")
+    st.title("瑞视 · 乌帕替尼(瑞福) DTP 销售运营看板")
+    st.caption("RuiLens · 艾伯维乌帕替尼(瑞福) DTP 药房销售与运营分析平台 ｜ v2.9")
 
     # ---- 时间筛选默认值（按钮通过 session_state 回填日期框）----
     _today = date.today()
@@ -937,6 +953,12 @@ def main():
     st.sidebar.header("① 数据源")
     st.sidebar.caption("部署版：请上传销售明细表（含患者隐私，不随仓库发布）")
     uploaded = st.sidebar.file_uploader("上传销售明细表 (.xlsx)", type=["xlsx"])
+    strip_pii = st.sidebar.checkbox(
+        "🛡 上传前自动剔除隐私列",
+        value=True,
+        help="默认开启：上传即把 电话 / 姓名 / 会员号 等直接标识符置空，"
+             "计算结果不受影响，但敏感信息不会进入服务器内存。",
+    )
 
     # ---- 侧边栏：时间筛选（按钮化快捷选择 + 年/月下拉，统一到"年月"）----
     st.sidebar.header("② 时间筛选")
@@ -985,6 +1007,12 @@ def main():
         st.info("👆 请在左侧上传销售明细表 (.xlsx) 后再查看看板。")
         return
     df = load_data(uploaded, None)
+
+    # 隐私保护：剔除直接标识符列（默认开启）
+    if strip_pii:
+        df, _dropped = strip_pii_columns(df)
+        if _dropped:
+            st.sidebar.success(f"🛡 已剔除隐私列：{', '.join(_dropped)}")
 
     # 全量数据（不受侧边栏药房筛选影响），供「单药房维度分析」Tab 使用
     df_all = df.copy()
