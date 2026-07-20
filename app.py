@@ -11,6 +11,7 @@
 - 分布图当月患者 = 当月有销售记录的患者（按末次购药时的药房/适应症归类）
 
 v2.2：新增「药房维度」Tab，含累计OP、活跃/OP/NP、复购率（末次购药+30天推算）、R12M DOT 及环比。
+v2.9.1：临床分析-医生明细新增「26年1月DOT(静态基线) / R12M DOT(滚动) / DOT增长」三列。
 """
 
 import io
@@ -659,6 +660,7 @@ def clinical_top5(df_all, pt_all, target_month, mapping):
     m_prev, m_cur = months3[1], months3[2]
     lab_prev, lab_cur = month_labels[1], month_labels[2]
     doc_rows = []
+    BASE_MONTH = date(2026, 1, 1)  # 医生 DOT 静态基线锚点（2026-01 回滚12个月）
 
     def _doc_metrics(sub, m):
         ms, me = m.to_timestamp(), m.to_timestamp(how="end")
@@ -685,6 +687,10 @@ def clinical_top5(df_all, pt_all, target_month, mapping):
             pt_prev, pt_cur = pv["患者数"], cv["患者数"]
             sl = (sv_cur - sv_prev) / sv_prev if sv_prev else None
             pl = (pt_cur - pt_prev) / pt_prev if pt_prev else None
+            # —— 医生 DOT：静态基线(2026-01) + 滚动(target_month) + 增长 ——
+            dot_base = _doctor_r12m_dot(d, h, doc, BASE_MONTH)
+            dot_cur = _doctor_r12m_dot(d, h, doc, target_month)
+            dot_growth = (dot_cur - dot_base) / dot_base if dot_base else None
             doc_rows.append({
                 "医院": h,
                 "医生": _mask_name(doc),
@@ -694,9 +700,36 @@ def clinical_top5(df_all, pt_all, target_month, mapping):
                 f"{lab_prev}患者数": pt_prev,
                 f"{lab_cur}患者数": pt_cur,
                 "患者数环比": round(pl, 3) if pl is not None else None,
+                "26年1月DOT": round(dot_base, 2),
+                "R12M DOT": round(dot_cur, 2),
+                "DOT增长": round(dot_growth, 3) if dot_growth is not None else None,
             })
     doctor_df = pd.DataFrame(doc_rows)
     return hosp_df, doctor_df
+
+
+def _doctor_r12m_dot(d, hosp, doctor, anchor):
+    """某医院某医生在 anchor 月「回滚 12 个月」的 DOT（盒/患者）。
+
+    DOT = 窗口内净销量盒数总和 / 窗口内净销量>0 的去重患者数。
+    anchor 可为静态基线 date(2026,1,1) 或滚动口径 target_month。
+    """
+    a_p = pd.Timestamp(anchor).to_period("M")
+    start = (a_p - 11).to_timestamp()
+    end = a_p.to_timestamp(how="end")
+    s = d[
+        (d["医疗单位"] == hosp)
+        & (d["处方医生"] == doctor)
+        & (d["销售时间"] >= start)
+        & (d["销售时间"] <= end)
+    ]
+    if len(s) == 0:
+        return 0.0
+    net = s.groupby("key")["销售数量"].sum()
+    pos = net[net > 0]
+    if len(pos) == 0:
+        return 0.0
+    return float(pos.sum()) / pos.index.nunique()
 
 
 # ------------------------- 运营分析 -------------------------
@@ -1626,11 +1659,18 @@ def main():
         st.caption(
             f"每家医院展示 TOP3 医生（按 {_ml[2]} 月销量排序）；列 = {_ml[1]} / {_ml[2]} 销量、患者数及环比（增长率）。"
             "医生姓名已脱敏。"
+            "新增每位医生「26年1月DOT(静态基线) / R12M DOT(滚动) / DOT增长」，用于横向看今年 DOT 是否提升。"
         )
         if len(doctor_df):
             _doc_cfg = {
                 "销量环比": st.column_config.NumberColumn(format="%.1%"),
                 "患者数环比": st.column_config.NumberColumn(format="%.1%"),
+                "26年1月DOT": st.column_config.NumberColumn(
+                    format="%.2f", help="静态基线：2026年1月回滚12个月 DOT"),
+                "R12M DOT": st.column_config.NumberColumn(
+                    format="%.2f", help="滚动口径：目标月回滚12个月 DOT"),
+                "DOT增长": st.column_config.NumberColumn(
+                    format="%.1%", help="(R12M DOT − 26年1月基线) / 基线"),
             }
             st.dataframe(doctor_df, column_config=_doc_cfg, use_container_width=True, hide_index=True)
             _download_csv(doctor_df, "临床_医生明细.csv", "⬇ 下载医生明细数据", "dl_clin_doc")
