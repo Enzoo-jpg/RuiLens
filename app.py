@@ -145,7 +145,7 @@ def indication_dist(df, pt, target_month, mapping):
         mapped = raw_str.map(mapping)
         # 空值(NaN 原始适应症)一律自动归为“其他”
         mapped = mapped.where(raw_str.notna(), "其他")
-        mapped = mapped.fillna("其他(未映射)")
+        mapped = mapped.fillna("其他")
     else:
         # 无映射表：空值也归“其他”，其余保留原始写法
         mapped = raw_str.apply(lambda x: "其他" if x is None else x)
@@ -157,6 +157,21 @@ def indication_dist(df, pt, target_month, mapping):
     else:
         unmapped = raw.dropna().astype(str).value_counts().rename_axis("原始适应症").reset_index(name="患者数")
     return counts, unmapped
+
+
+def unmapped_detail(pt, mapping):
+    """当前数据范围内，映射表未覆盖的非空原始适应症及其患者数（供网页补填维护）。
+    空值已自动归为「其他」，不列入未映射。"""
+    raw = pt["末次适应症"]
+    raw_str = raw.apply(lambda x: None if pd.isna(x) else str(x).strip())
+    if mapping is not None:
+        unmapped_mask = raw_str.notna() & raw_str.map(mapping).isna()
+        unmapped = raw_str[unmapped_mask]
+    else:
+        unmapped = raw_str.dropna()
+    if len(unmapped) == 0:
+        return pd.DataFrame(columns=["原始适应症", "患者数"])
+    return unmapped.value_counts().rename_axis("原始适应症").reset_index(name="患者数")
 
 
 # ------------------------- 映射表读取 -------------------------
@@ -220,12 +235,12 @@ def std_qty_from_map(mp_df):
 
 # ------------------------- 趋势分析计算 -------------------------
 def _clean_indication(series, mapping):
-    """原始适应症 -> 清洗后标准值；空值->其他；找不到->其他(未映射)。"""
+    """原始适应症 -> 清洗后标准值；空值 / 找不到 -> 其他。"""
     raw = series.apply(lambda x: None if pd.isna(x) else str(x).strip())
     if mapping is not None:
         mapped = raw.map(mapping)
         mapped = mapped.where(raw.notna(), "其他")
-        mapped = mapped.fillna("其他(未映射)")
+        mapped = mapped.fillna("其他")
     else:
         mapped = raw.apply(lambda x: "其他" if x is None else x)
     return mapped
@@ -1134,7 +1149,8 @@ def main():
         _, pt_all = build_patient_table(df_all)  # 全局患者表：单药房Tab的新/老患按全局首次购药判定
         pool = patient_pool(d_keyed, pt, ytd_start, disp_start, disp_end)
         pharm = pharmacy_dist(d_keyed, target_month)
-        ind_counts, unmapped = indication_dist(d_keyed, pt, target_month, effective_mapping)
+        ind_counts, _ = indication_dist(d_keyed, pt, target_month, effective_mapping)
+        unmapped = unmapped_detail(pt, effective_mapping)
         std_qty = std_qty_from_map(mp_df)
         sales = sales_trend(d_keyed, pt, disp_start, disp_end)
         np_ind = np_by_indication(d_keyed, pt, disp_start, disp_end, effective_mapping)
@@ -1329,9 +1345,10 @@ def main():
                 st.info("当前月无适应症数据。")
 
         # ---- 未映射明细（可在网页直接补填映射）----
-        st.subheader("适应症清洗维护：未映射明细")
-        st.caption("下表为当月患者中、映射表里找不到的原始适应症。可在右侧「标准值」列填写（如 RA / AD / 其他），"
-                   "点「应用网页新增映射」即时生效；空值适应症已自动归为「其他」。")
+        st.subheader("适应症清洗维护：未映射明细（全量）")
+        st.caption("下表为当前数据范围内所有患者中、映射表里找不到的原始适应症（不再只限目标月）。"
+                   "可在右侧「标准值」列填写（如 RA / AD / 其他），点「应用网页新增映射」即时生效；"
+                   "空值适应症已自动归为「其他」")
         if len(unmapped):
             edit_df = unmapped.copy()
             edit_df["标准值（填写后点应用）"] = ""
@@ -1358,7 +1375,7 @@ def main():
             # 未映射明细可下载（供维护回写）
             _download_csv(unmapped, "未映射明细.csv", "⬇ 下载未映射明细", "dl_unmap")
         else:
-            st.success("当月所有适应症均已映射到标准值 ✅（空值已自动归为「其他」）")
+            st.success("当前数据范围内所有适应症均已映射到标准值 ✅（空值已自动归为「其他」）")
 
         # ---- 映射表查看 ----
         if mp_df is not None:
