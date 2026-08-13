@@ -1016,7 +1016,7 @@ def main():
 
     # ---- 侧边栏：时间筛选（年/月合并为单一下拉，默认按数据范围推导）----
     st.sidebar.header("② 时间筛选")
-    st.sidebar.caption("年/月合并为单一下拉；展示区间与目标月默认取数据范围，YTD 起始默认 2026-01。")
+    st.sidebar.caption("年/月合并为单一下拉；展示起始月默认=最新月减11个月（严格12个月窗口）、结束月/目标月默认=最新月，YTD 起始默认 2026-01。")
 
     # 早期读取数据：仅取销售时间最小/最大月份用于推导默认值，并供后续复用（避免重复读文件）
     _df_loaded = None
@@ -1052,7 +1052,12 @@ def main():
         return date(y, m, 1)
 
     ytd_start = _month_selector("YTD 开始年月", "ytd_m", "2026-01")
-    disp_start = _month_selector("展示起始月", "ds_m", str(_min_m) if _min_m is not None else "2025-05")
+    # 展示起始月：按文档最新日期倒推 12 个月；数据不足 12 个月时取最早月（保证落在可选项范围内）
+    _disp_start_default = "2025-05"
+    if _max_m is not None:
+        _ds = _max_m - 11
+        _disp_start_default = str(_ds if _ds >= _min_m else _min_m)
+    disp_start = _month_selector("展示起始月", "ds_m", _disp_start_default)
     disp_end = _month_selector("展示结束月", "de_m", str(_max_m) if _max_m is not None else "2026-07")
     target_month = _month_selector("分布图目标年月", "t_m", str(_max_m) if _max_m is not None else "2026-04")
     st.sidebar.info(
