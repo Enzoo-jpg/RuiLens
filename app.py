@@ -349,7 +349,7 @@ def pharmacy_table(d, pt, ytd_start, target_month):
         * 应购 = 首购早于目标月，且在该药房末次正销量购药 + 盒数x30 天落在目标月内。
         * 实际复购 = 应购患者中目标月在该药房有购买的患者。
     - R12M DOT：回滚 12 个月净销量盒数 / 去重患者数（药房维度）。
-    - 环比：本月值 - 上月值（差值，非增长率）。
+    - R12M DOT环比：本月R12M DOT / 上月R12M DOT − 1（增长率；上月DOT为0时记为缺失）。
     """
     target_start, target_end = _month_bounds(target_month)
     prev_start, prev_end = _month_bounds(
@@ -421,7 +421,9 @@ def pharmacy_table(d, pt, ytd_start, target_month):
     )
     merged = cur.merge(prev_cols, on="药房名称", how="left")
     merged["复购率环比"] = merged["目标月复购率"] - merged["上月复购率"]
-    merged["R12M DOT环比"] = merged["R12M DOT"] - merged["上月DOT"]
+    # R12M DOT环比 = 本月DOT / 上月DOT − 1（增长率；上月DOT为0时记为缺失）
+    _prev_dot = merged["上月DOT"].replace(0, np.nan)
+    merged["R12M DOT环比"] = merged["R12M DOT"] / _prev_dot - 1
 
     out = merged[
         ["药房名称", "累计OP数量", "目标月活跃人数", "目标月OP人数", "目标月NP人数",
@@ -1205,7 +1207,7 @@ def main():
     _pharm_xlsx["目标月复购率"] = _pharm_xlsx["目标月复购率"].map(lambda x: f"{x:.1%}" if pd.notna(x) else "")
     _pharm_xlsx["复购率环比"] = _pharm_xlsx["复购率环比"].map(lambda x: f"{x:.1%}" if pd.notna(x) else "")
     _pharm_xlsx["R12M DOT"] = _pharm_xlsx["R12M DOT"].map(lambda x: f"{x:.2f}" if pd.notna(x) else "")
-    _pharm_xlsx["R12M DOT环比"] = _pharm_xlsx["R12M DOT环比"].map(lambda x: f"{x:.2f}" if pd.notna(x) else "")
+    _pharm_xlsx["R12M DOT环比"] = _pharm_xlsx["R12M DOT环比"].map(lambda x: f"{x:.1%}" if pd.notna(x) else "")
     _download_all_xlsx(
         pool, pharm_df, ind_df, unmapped, web_map_df, _kpi,
         "患者池看板_全部数据.xlsx",
@@ -1414,7 +1416,7 @@ def main():
         st.caption(
             "患者按每笔销售记录归属药房，可在多个药房出现；累计OP = YTD 累计老患者且在该药房有过购买；"
             "复购率 = 应购患者中目标月实际复购占比（应购 = 末次正销量购药 + 盒数×30 天落在目标月内）；"
-            "环比 = 本月值 − 上月值。"
+            "R12M DOT环比 = 本月DOT / 上月DOT − 1（增长率）；复购率环比 = 本月复购率 − 上月复购率（差值）。"
         )
         if len(pharm_metrics):
             # 展示用短列名
@@ -1425,10 +1427,9 @@ def main():
                 "目标月复购率": "复购率",
             }).copy()
             st.dataframe(
-                _pct(display, ["复购率", "复购率环比"]),
+                _pct(display, ["复购率", "复购率环比", "R12M DOT环比"]),
                 column_config={
                     "R12M DOT": st.column_config.NumberColumn(format="%.2f"),
-                    "R12M DOT环比": st.column_config.NumberColumn(format="%.2f"),
                 },
                 use_container_width=True,
                 hide_index=True,
