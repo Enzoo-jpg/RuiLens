@@ -945,6 +945,19 @@ def _fmt_month(df):
     return d
 
 
+def _pct(df, cols, ppt_cols=None):
+    """将指定列（0~1 小数值）转为百分比字符串，便于直接显示（不依赖 column_config 的兼容性）。
+    cols      : 普通百分比列，显示为 'xx.x%'
+    ppt_cols : 百分点变化列，显示为 '+x.x ppt' / '-x.x ppt'
+    """
+    out = df.copy()
+    for c in cols:
+        out[c] = out[c].map(lambda x: f"{x:.1%}" if pd.notna(x) else "")
+    for c in (ppt_cols or []):
+        out[c] = out[c].map(lambda x: f"{x:+.1f} ppt" if pd.notna(x) else "")
+    return out
+
+
 def _download_all_xlsx(pool, pharm_df, ind_df, unmapped, web_map_df, kpi_dict,
                        filename, label, key, extra_sheets=None):
     """把看板所有内容打包成一个 Excel（多 sheet，UTF-8），一次下载全部。
@@ -1293,13 +1306,7 @@ def main():
             pharm_mom = _mom_df(pharm, pharmacy_dist(d_keyed, prev_month), "药房名称")
             if len(pharm_mom):
                 st.dataframe(
-                    pharm_mom,
-                    column_config={
-                        "本月占比": st.column_config.NumberColumn(format="%.1%"),
-                        "上月占比": st.column_config.NumberColumn(format="%.1%"),
-                        "占比变化(ppt)": st.column_config.NumberColumn(format="%.1f"),
-                        "环比增长率": st.column_config.NumberColumn(format="%.1%"),
-                    },
+                    _pct(pharm_mom, ["本月占比", "上月占比", "环比增长率"], ["占比变化(ppt)"]),
                     use_container_width=True,
                     hide_index=True,
                 )
@@ -1313,13 +1320,7 @@ def main():
             ind_mom = _mom_df(ind_counts, ind_counts_prev, "标准适应症")
             if len(ind_mom):
                 st.dataframe(
-                    ind_mom,
-                    column_config={
-                        "本月占比": st.column_config.NumberColumn(format="%.1%"),
-                        "上月占比": st.column_config.NumberColumn(format="%.1%"),
-                        "占比变化(ppt)": st.column_config.NumberColumn(format="%.1f"),
-                        "环比增长率": st.column_config.NumberColumn(format="%.1%"),
-                    },
+                    _pct(ind_mom, ["本月占比", "上月占比", "环比增长率"], ["占比变化(ppt)"]),
                     use_container_width=True,
                     hide_index=True,
                 )
@@ -1407,10 +1408,8 @@ def main():
                 "目标月复购率": "复购率",
             }).copy()
             st.dataframe(
-                display,
+                _pct(display, ["复购率", "复购率环比"]),
                 column_config={
-                    "复购率": st.column_config.NumberColumn(format="%.1%"),
-                    "复购率环比": st.column_config.NumberColumn(format="%.1%"),
                     "R12M DOT": st.column_config.NumberColumn(format="%.2f"),
                     "R12M DOT环比": st.column_config.NumberColumn(format="%.2f"),
                 },
@@ -1734,9 +1733,8 @@ def main():
             _hosp_cfg = {
                 "R12M DOT": st.column_config.NumberColumn(format="%.2f"),
                 "25年DOT": st.column_config.NumberColumn(format="%.2f"),
-                "同比": st.column_config.NumberColumn(format="%.1%"),
             }
-            st.dataframe(hosp_df, column_config=_hosp_cfg, use_container_width=True, hide_index=True)
+            st.dataframe(_pct(hosp_df, ["同比"]), column_config=_hosp_cfg, use_container_width=True, hide_index=True)
             _download_csv(hosp_df, "临床_TOP5医院.csv", "⬇ 下载 TOP5 医院汇总数据", "dl_clin_hosp")
         else:
             st.info("当前锚定月无医院销售数据。")
@@ -1752,20 +1750,16 @@ def main():
         )
         if len(doctor_df):
             _doc_cfg = {
-                "销量环比": st.column_config.NumberColumn(format="%.1%"),
-                "患者数环比": st.column_config.NumberColumn(format="%.1%"),
                 "26年1月DOT": st.column_config.NumberColumn(
                     format="%.2f", help="静态基线：2026年1月回滚12个月 DOT"),
                 "26年6月DOT": st.column_config.NumberColumn(
                     format="%.2f", help="静态基线：2026年6月回滚12个月 DOT"),
                 "R12M DOT": st.column_config.NumberColumn(
                     format="%.2f", help="滚动口径：目标月回滚12个月 DOT"),
-                "DOT增长": st.column_config.NumberColumn(
-                    format="%.1%", help="(R12M DOT − 26年1月基线) / 基线"),
-                "DOT增长(对6月)": st.column_config.NumberColumn(
-                    format="%.1%", help="(R12M DOT − 26年6月基线) / 基线"),
             }
-            st.dataframe(doctor_df, column_config=_doc_cfg, use_container_width=True, hide_index=True)
+            st.dataframe(
+                _pct(doctor_df, ["销量环比", "患者数环比", "DOT增长", "DOT增长(对6月)"]),
+                column_config=_doc_cfg, use_container_width=True, hide_index=True)
             _download_csv(doctor_df, "临床_医生明细.csv", "⬇ 下载医生明细数据", "dl_clin_doc")
         else:
             st.info("当前范围内无医生明细数据。")
@@ -1793,10 +1787,9 @@ def main():
                    "R12M DOT / 规范治疗率=展示结束月口径。")
         if len(ind_sum):
             _ind_cfg = {
-                "规范治疗率": st.column_config.NumberColumn(format="%.1%"),
                 "R12M DOT": st.column_config.NumberColumn(format="%.2f"),
             }
-            st.dataframe(ind_sum, column_config=_ind_cfg, use_container_width=True, hide_index=True)
+            st.dataframe(_pct(ind_sum, ["规范治疗率"]), column_config=_ind_cfg, use_container_width=True, hide_index=True)
             _download_csv(ind_sum, "运营_适应症对比.csv", "⬇ 下载适应症全局对比", "dl_ops_ind")
             _top_ind = ind_sum.iloc[0]
             _best_rate = ind_sum.loc[ind_sum["规范治疗率"].idxmax()]
@@ -1817,14 +1810,13 @@ def main():
                    "颜色越深留存越好；灰=尚无数据（未到该月）。")
         if len(cohort):
             _cohort_cols = [c for c in cohort.columns if "留存" in c]
-            _cohort_cfg = {c: st.column_config.NumberColumn(format="%.1%") for c in _cohort_cols}
             _heat = cohort.set_index("首购月")[_cohort_cols].T
             fig_coh = px.imshow(_heat, aspect="auto", color_continuous_scale="Blues",
                                 labels=dict(x="首购月", y="距首购月数", color="留存率"),
                                 title="留存率热力图")
             fig_coh.update_layout(height=360)
             st.plotly_chart(fig_coh, width="stretch")
-            st.dataframe(cohort, column_config=_cohort_cfg, use_container_width=True, hide_index=True)
+            st.dataframe(_pct(cohort, _cohort_cols), use_container_width=True, hide_index=True)
             _download_csv(cohort, "运营_留存漏斗.csv", "⬇ 下载留存 cohort", "dl_ops_cohort")
             _has12 = cohort[cohort["+12月留存"].notna()]
             if len(_has12):
