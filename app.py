@@ -1014,39 +1014,52 @@ def main():
              "计算结果不受影响，但敏感信息不会进入服务器内存。",
     )
 
-    # ---- 侧边栏：时间筛选（按钮化快捷选择 + 年/月下拉，统一到"年月"）----
+    # ---- 侧边栏：时间筛选（年/月合并为单一下拉，默认按数据范围推导）----
     st.sidebar.header("② 时间筛选")
+    st.sidebar.caption("年/月合并为单一下拉；展示区间与目标月默认取数据范围，YTD 起始默认 2026-01。")
 
-    _yrs = list(range(2022, _today.year + 2))
-    _mos = list(range(1, 13))
+    # 早期读取数据：仅取销售时间最小/最大月份用于推导默认值，并供后续复用（避免重复读文件）
+    _df_loaded = None
+    _min_m = _max_m = None
+    if uploaded is not None:
+        _df_loaded = load_data(uploaded, None)
+        _s = pd.to_datetime(_df_loaded["销售时间"], errors="coerce").dropna()
+        if len(_s):
+            _min_m = _s.min().to_period("M")
+            _max_m = _s.max().to_period("M")
 
-    def _ym_selector(label, ykey, mkey, default_date):
-        """年 + 月 两个下拉，返回 date(year, month, 1)。快捷按钮通过 session_state 回填。"""
-        if ykey not in st.session_state:
-            st.session_state[ykey] = default_date.year
-        if mkey not in st.session_state:
-            st.session_state[mkey] = default_date.month
-        col_y, col_m = st.sidebar.columns(2)
-        with col_y:
-            y = st.selectbox("年", _yrs, index=_yrs.index(st.session_state[ykey]), key=ykey)
-        with col_m:
-            m = st.selectbox("月", _mos, index=_mos.index(st.session_state[mkey]), key=mkey)
+    def _month_options(min_p, max_p):
+        if min_p is None or max_p is None:
+            yrs = list(range(2022, _today.year + 2))
+            periods = [pd.Period(year=y, month=mo, freq="M") for y in yrs for mo in range(1, 13)]
+        else:
+            periods = pd.period_range(min_p, max_p, freq="M").tolist()
+        return [str(p) for p in periods]
+
+    _opt = _month_options(_min_m, _max_m)
+
+    def _month_selector(label, key, default_str, options=None, container=st.sidebar):
+        """单一下拉（YYYY-MM）选择年月，返回 date(year, month, 1)。"""
+        if options is None:
+            options = _opt
+        if key not in st.session_state:
+            st.session_state[key] = default_str
+        if st.session_state[key] not in options:
+            st.session_state[key] = default_str if default_str in options else (options[-1] if options else "")
+        idx = options.index(st.session_state[key])
+        val = container.selectbox(label, options, index=idx, key=key)
+        y, m = map(int, val.split("-"))
         return date(y, m, 1)
 
-    # YTD 开始年月
-    st.sidebar.markdown("**YTD 开始年月**")
-    ytd_start = _ym_selector("YTD 开始年月", "ytd_y", "ytd_m", date(2024, 1, 1))
-
-    # 展示区间（起 ~ 止月）
-    st.sidebar.markdown("**展示区间（起 ~ 止月）**")
-    disp_start = _ym_selector("展示起始月", "ds_y", "ds_m", date(2025, 5, 1))
-    disp_end = _ym_selector("展示结束月", "de_y", "de_m", date(2026, 4, 1))
-
-    # 分布图目标年月
-    st.sidebar.markdown("**分布图目标年月**")
-    st.sidebar.caption("分布图按所选年月统计")
-    target_month = _ym_selector("选择目标年月", "t_y", "t_m", date(2026, 4, 1))
-    st.sidebar.info(f"当前选择：{target_month.strftime('%Y年%m月')}")
+    ytd_start = _month_selector("YTD 开始年月", "ytd_m", "2026-01")
+    disp_start = _month_selector("展示起始月", "ds_m", str(_min_m) if _min_m is not None else "2025-05")
+    disp_end = _month_selector("展示结束月", "de_m", str(_max_m) if _max_m is not None else "2026-07")
+    target_month = _month_selector("分布图目标年月", "t_m", str(_max_m) if _max_m is not None else "2026-04")
+    st.sidebar.info(
+        f"当前选择：YTD {ytd_start.strftime('%Y-%m')} ｜ "
+        f"展示 {disp_start.strftime('%Y-%m')}~{disp_end.strftime('%Y-%m')} ｜ "
+        f"目标 {target_month.strftime('%Y-%m')}"
+    )
 
     # ---- 侧边栏：适应症映射 ----
     st.sidebar.header("③ 适应症清洗映射")
@@ -1060,7 +1073,9 @@ def main():
     if uploaded is None:
         st.info("👆 请在左侧上传销售明细表 (.xlsx) 后再查看看板。")
         return
-    df = load_data(uploaded, None)
+    if _df_loaded is None:
+        _df_loaded = load_data(uploaded, None)
+    df = _df_loaded
 
     # 隐私保护：剔除直接标识符列（默认开启）
     if strip_pii:
@@ -1451,12 +1466,16 @@ def main():
                                       index=0 if "成都西三段药房(连锁）" not in _all_pharms
                                       else _all_pharms.index("成都西三段药房(连锁）"))
 
-            # 时间范围（起 ~ 止月）
+            # 时间范围（起 ~ 止月，年/月合并为单一下拉）
+            _sp_opt = _month_options(
+                pd.to_datetime(df_all["销售时间"], errors="coerce").min().to_period("M"),
+                pd.to_datetime(df_all["销售时间"], errors="coerce").max().to_period("M"),
+            )
             sc1, sc2 = st.columns(2)
             with sc1:
-                sp_start = _ym_selector("起始月", "sp_sy", "sp_sm", date(2025, 5, 1))
+                sp_start = _month_selector("起始月", "sp_start_m", _sp_opt[0] if _sp_opt else "2025-05", options=_sp_opt, container=st)
             with sc2:
-                sp_end = _ym_selector("结束月", "sp_ey", "sp_em", date(2026, 4, 1))
+                sp_end = _month_selector("结束月", "sp_end_m", _sp_opt[-1] if _sp_opt else "2026-04", options=_sp_opt, container=st)
 
             # 构造该药房全量（带患者 key），供本 Tab 所有计算复用
             d_pharm = df_all[df_all["药房名称"].astype(str).str.strip() == sel_single].copy()
