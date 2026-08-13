@@ -987,8 +987,8 @@ def _download_all_xlsx(pool, pharm_df, ind_df, unmapped, web_map_df, kpi_dict,
 
 # ------------------------- 主程序 -------------------------
 def main():
-    st.set_page_config(page_title="瑞视 · 乌帕替尼 DTP 运营看板", layout="wide")
-    st.title("瑞视 · 乌帕替尼(瑞福) DTP 销售运营看板")
+    st.set_page_config(page_title="乌帕替尼（瑞福） 月度数据看板", layout="wide")
+    st.title("乌帕替尼（瑞福） 月度数据看板")
     st.caption("RuiLens · 艾伯维乌帕替尼(瑞福) DTP 药房销售与运营分析平台 ｜ v2.9")
 
     # ---- 时间筛选默认值（按钮通过 session_state 回填日期框）----
