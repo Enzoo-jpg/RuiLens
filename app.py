@@ -1269,6 +1269,64 @@ def main():
             else:
                 st.info("该月无销售记录。")
 
+        # ---- 分布图环比（当前目标月 vs 上月）----
+        prev_month = (pd.Timestamp(target_month).to_period("M") - 1).to_timestamp().date()
+        st.subheader(f"环比变化：{_date_label} vs {prev_month.strftime('%Y年%m月')}")
+        st.caption("按末次购药口径；上月无记录时显示为 0；环比增长率分母为 0 时显示为空。占比变化单位：百分点（ppt）")
+
+        def _mom_df(cur, prev, name_col):
+            df = pd.DataFrame({"本月患者数": cur, "上月患者数": prev}).fillna(0).astype(int)
+            df["患者数变化"] = df["本月患者数"] - df["上月患者数"]
+            df["环比增长率"] = df["患者数变化"] / df["上月患者数"].replace(0, np.nan)
+            cur_total = df["本月患者数"].sum()
+            prev_total = df["上月患者数"].sum()
+            df["本月占比"] = df["本月患者数"] / cur_total if cur_total else 0
+            df["上月占比"] = df["上月患者数"] / prev_total if prev_total else 0
+            df["占比变化(ppt)"] = (df["本月占比"] - df["上月占比"]) * 100
+            df = df.reset_index().rename(columns={"index": name_col})
+            df = df.sort_values("患者数变化", key=lambda s: s.abs(), ascending=False).reset_index(drop=True)
+            return df
+
+        c3, c4 = st.columns(2)
+        with c3:
+            st.markdown("**药房环比**")
+            pharm_mom = _mom_df(pharm, pharmacy_dist(d_keyed, prev_month), "药房名称")
+            if len(pharm_mom):
+                st.dataframe(
+                    pharm_mom,
+                    column_config={
+                        "本月占比": st.column_config.NumberColumn(format="%.1%"),
+                        "上月占比": st.column_config.NumberColumn(format="%.1%"),
+                        "占比变化(ppt)": st.column_config.NumberColumn(format="%.1f"),
+                        "环比增长率": st.column_config.NumberColumn(format="%.1%"),
+                    },
+                    use_container_width=True,
+                    hide_index=True,
+                )
+                _download_csv(pharm_mom, "药房分布_环比.csv", "⬇ 下载药房环比数据", "dl_pharm_mom")
+            else:
+                st.info("当前月无药房数据。")
+
+        with c4:
+            st.markdown("**适应症环比**")
+            ind_counts_prev, _ = indication_dist(d_keyed, pt, prev_month, effective_mapping)
+            ind_mom = _mom_df(ind_counts, ind_counts_prev, "标准适应症")
+            if len(ind_mom):
+                st.dataframe(
+                    ind_mom,
+                    column_config={
+                        "本月占比": st.column_config.NumberColumn(format="%.1%"),
+                        "上月占比": st.column_config.NumberColumn(format="%.1%"),
+                        "占比变化(ppt)": st.column_config.NumberColumn(format="%.1f"),
+                        "环比增长率": st.column_config.NumberColumn(format="%.1%"),
+                    },
+                    use_container_width=True,
+                    hide_index=True,
+                )
+                _download_csv(ind_mom, "适应症分布_环比.csv", "⬇ 下载适应症环比数据", "dl_ind_mom")
+            else:
+                st.info("当前月无适应症数据。")
+
         # ---- 未映射明细（可在网页直接补填映射）----
         st.subheader("适应症清洗维护：未映射明细")
         st.caption("下表为当月患者中、映射表里找不到的原始适应症。可在右侧「标准值」列填写（如 RA / AD / 其他），"
