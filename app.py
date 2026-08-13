@@ -711,6 +711,16 @@ def clinical_top5(df_all, pt_all, target_month, mapping):
             pt_prev, pt_cur = pv["患者数"], cv["患者数"]
             sl = (sv_cur - sv_prev) / sv_prev if sv_prev else None
             pl = (pt_cur - pt_prev) / pt_prev if pt_prev else None
+            # 当月(target月) 该医生新患数：首购月 == m_cur 且 当月有正净销量（新患定义与全局一致）
+            mc_s, mc_e = m_cur.to_timestamp(), m_cur.to_timestamp(how="end")
+            doc_m = sub[(sub["处方医生"] == doc) & (sub["销售时间"] >= mc_s) & (sub["销售时间"] <= mc_e)]
+            net_m = doc_m.groupby("key")["销售数量"].sum()
+            valid_m = net_m[net_m > 0].index
+            if len(valid_m):
+                fm_m = first_purchase.reindex(valid_m).dt.to_period("M")
+                n_new_cur = int((fm_m == m_cur).sum())
+            else:
+                n_new_cur = 0
             # —— 医生 DOT：静态基线(2026-01) + 跟随底表最新月基线 + 滚动(target_month) + 两档增长 ——
             dot_base = _doctor_r12m_dot(d, h, doc, BASE_MONTH)
             dot_base_latest = _doctor_r12m_dot(d, h, doc, BASE_MONTH_LATEST)
@@ -725,6 +735,7 @@ def clinical_top5(df_all, pt_all, target_month, mapping):
                 "销量环比": round(sl, 3) if sl is not None else None,
                 f"{lab_prev}患者数": pt_prev,
                 f"{lab_cur}患者数": pt_cur,
+                f"{lab_cur}新患": n_new_cur,
                 "患者数环比": round(pl, 3) if pl is not None else None,
                 "26年1月DOT": round(dot_base, 2),
                 f"{LATEST_LABEL}DOT": round(dot_base_latest, 2),
@@ -734,6 +745,7 @@ def clinical_top5(df_all, pt_all, target_month, mapping):
             })
     doctor_df = pd.DataFrame(doc_rows)
     doctor_df.attrs["latest_label"] = LATEST_LABEL
+    doctor_df.attrs["cur_label"] = lab_cur   # 当前锚定月（新患列对应的月份）
     return hosp_df, doctor_df
 
 
@@ -1767,14 +1779,18 @@ def main():
         st.divider()
         st.subheader("医生明细（每家 TOP3，近两个月）")
         st.caption(
-            f"每家医院展示 TOP3 医生（按 {_ml[2]} 月销量排序）；列 = {_ml[1]} / {_ml[2]} 销量、患者数及环比（增长率）。"
+            f"每家医院展示 TOP3 医生（按 {_ml[2]} 月销量排序）；列 = {_ml[1]} / {_ml[2]} 销量、患者数、"
+            f"新患（{_ml[2]} 当月新患）及环比（增长率）。"
             "医生姓名已脱敏。"
             "新增每位医生「26年1月DOT / 底表最新月DOT(跟随数据最新月份) / R12M DOT(滚动) / DOT增长 / DOT增长(对最新月基线)」，"
             "用于横向看今年 DOT 是否提升、以及 1月→最新月→当前的年内走势。"
         )
         if len(doctor_df):
             _latest_label = doctor_df.attrs.get("latest_label", "最新月")
+            _cur_label = doctor_df.attrs.get("cur_label", _ml[2])
             _doc_cfg = {
+                f"{_cur_label}新患": st.column_config.NumberColumn(
+                    help=f"新患 = 全局首购月 == {_cur_label}（与看板全局新患口径一致）；即当前锚定月（{_cur_label}）当月新患数量。"),
                 "26年1月DOT": st.column_config.NumberColumn(
                     format="%.2f", help="静态基线：2026年1月回滚12个月 DOT"),
                 f"{_latest_label}DOT": st.column_config.NumberColumn(
