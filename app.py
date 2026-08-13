@@ -420,7 +420,9 @@ def pharmacy_table(d, pt, ytd_start, target_month):
         columns={"目标月复购率": "上月复购率", "R12M DOT": "上月DOT"}
     )
     merged = cur.merge(prev_cols, on="药房名称", how="left")
-    merged["复购率环比"] = merged["目标月复购率"] - merged["上月复购率"]
+    # 复购率环比 = 本月复购率 / 上月复购率 − 1（增长率；上月复购率为0/缺失时记为缺失）
+    _prev_rebuy = merged["上月复购率"].replace(0, np.nan)
+    merged["复购率环比"] = merged["目标月复购率"] / _prev_rebuy - 1
     # R12M DOT环比 = 本月DOT / 上月DOT − 1（增长率；上月DOT为0时记为缺失）
     _prev_dot = merged["上月DOT"].replace(0, np.nan)
     merged["R12M DOT环比"] = merged["R12M DOT"] / _prev_dot - 1
@@ -1416,7 +1418,7 @@ def main():
         st.caption(
             "患者按每笔销售记录归属药房，可在多个药房出现；累计OP = YTD 累计老患者且在该药房有过购买；"
             "复购率 = 应购患者中目标月实际复购占比（应购 = 末次正销量购药 + 盒数×30 天落在目标月内）；"
-            "R12M DOT环比 = 本月DOT / 上月DOT − 1（增长率）；复购率环比 = 本月复购率 − 上月复购率（差值）。"
+            "R12M DOT环比 = 本月DOT / 上月DOT − 1（增长率）；复购率环比 = 本月复购率 / 上月复购率 − 1（增长率）。"
         )
         if len(pharm_metrics):
             # 展示用短列名
