@@ -336,6 +336,26 @@ def r12m_dot(d, pt, disp_start, disp_end, mapping):
     return pd.DataFrame(recs)
 
 
+def pharmacy_total_dot(d, disp_start, disp_end):
+    """药房整体（不分适应症）每月回滚12个月 DOT = 滚动12月净销量盒数总和 / 滚动12月去重患者数。
+
+    与 r12m_dot 完全同窗口口径（每月回看前11个月），但不按适应症拆分，
+    用于在"分适应症 R12M DOT 趋势"图上叠加一条药房整体趋势线。返回长表 [月份, DOT]。"""
+    d = d.copy()
+    d["销售数量"] = pd.to_numeric(d["销售数量"], errors="coerce").fillna(0)
+    months = pd.period_range(pd.Timestamp(disp_start), pd.Timestamp(disp_end), freq="M").to_timestamp()
+    recs = []
+    for m in months:
+        start = (pd.Timestamp(m).to_period("M") - 11).to_timestamp()
+        end = pd.Timestamp(m).to_period("M").to_timestamp() + pd.offsets.MonthEnd(1)
+        w = d[(d["销售时间"] >= start) & (d["销售时间"] <= end)]
+        if len(w) == 0:
+            continue
+        uniq = w["key"].nunique()
+        recs.append({"月份": m, "DOT": float(w["销售数量"].sum() / uniq) if uniq else 0.0})
+    return pd.DataFrame(recs)
+
+
 # ------------------------- 药房维度计算 -------------------------
 def pharmacy_table(d, pt, ytd_start, target_month):
     """药房维度汇总表：累计OP、目标月活跃/OP/NP、复购率（末次购药+30天）、R12M DOT 及环比。
@@ -1639,18 +1659,37 @@ def main():
             st.divider()
             st.subheader(f"{sel_single} · 深度趋势（R12M DOT / 新患 / 规范治疗率）")
 
-            # 图3：R12M DOT 趋势（按末次适应症）
-            st.markdown("**R12M DOT 趋势（按末次购药适应症拆分）**")
-            if len(dot_df2):
-                fig_dot = px.line(
-                    dot_df2, x="月份", y="DOT", color="适应症",
-                    title="R12M DOT 趋势（单药房·末次适应症）",
-                    category_orders={"适应症": _IND_ORDER},
-                )
-                fig_dot.update_layout(xaxis_tickformat="%Y-%m", height=420,
+            # 图3：R12M DOT 趋势（按末次适应症 + 药房整体）
+            st.markdown("**R12M DOT 趋势（按末次购药适应症拆分 + 药房整体）**")
+            dot_total_df = pharmacy_total_dot(d_pharm, sp_start, sp_end) if len(d_pharm) else pd.DataFrame(columns=["月份", "DOT"])
+            if len(dot_df2) or len(dot_total_df):
+                fig_dot = go.Figure()
+                # 药房整体趋势（不分子适应症，黑粗线叠加在最上层）
+                if len(dot_total_df):
+                    fig_dot.add_trace(go.Scatter(
+                        x=dot_total_df["月份"], y=dot_total_df["DOT"],
+                        name="药房整体", mode="lines+markers",
+                        line=dict(color="#111111", width=3.5)))
+                # 分适应症
+                for ind in _IND_ORDER:
+                    s = dot_df2[dot_df2["适应症"] == ind]
+                    if len(s):
+                        fig_dot.add_trace(go.Scatter(
+                            x=s["月份"], y=s["DOT"], name=ind, mode="lines+markers"))
+                for ind in [c for c in dot_df2["适应症"].unique() if c not in _IND_ORDER]:
+                    s = dot_df2[dot_df2["适应症"] == ind]
+                    if len(s):
+                        fig_dot.add_trace(go.Scatter(
+                            x=s["月份"], y=s["DOT"], name=ind, mode="lines+markers"))
+                fig_dot.update_layout(title="R12M DOT 趋势（单药房·末次适应症 + 药房整体）",
+                                      xaxis_tickformat="%Y-%m", height=420,
                                       yaxis_title="DOT（盒/人·12月）")
                 st.plotly_chart(fig_dot, width="stretch")
-                _download_csv(dot_df2.assign(月份=dot_df2["月份"].dt.strftime("%Y-%m")),
+                # 下载：药房整体 + 分适应症合并
+                _dot_dl = pd.concat(
+                    [dot_total_df.assign(适应症="药房整体"), dot_df2]
+                ) if len(dot_total_df) else dot_df2
+                _download_csv(_dot_dl.assign(月份=_dot_dl["月份"].dt.strftime("%Y-%m")),
                               "单药房_R12M_DOT趋势.csv", "⬇ 下载 R12M DOT 趋势", "dl_sp_dot")
             else:
                 st.info("该药房在所选时间范围内无数据。")
@@ -1726,6 +1765,7 @@ def main():
                 (_fmt_month(sales_df), "新老患销量"),
                 (_fmt_month(np_df2), "新患趋势"),
                 (_fmt_month(dot_df2), "R12M_DOT趋势"),
+                (_fmt_month(dot_total_df), "药房整体DOT"),
                 (_rate_out, "规范治疗率"),
             ]
             _sp_data = _write_excel_bytes(_sp_sheets)
@@ -1741,7 +1781,8 @@ def main():
         if len(sales_df):
             _tot_box = int(sales_df["老患销量"].sum() + sales_df["新患销量"].sum())
             _np_total = int(np_df2["新患数"].sum()) if len(np_df2) else 0
-            _last_dot = dot_df2.iloc[-1]["DOT"] if len(dot_df2) else 0
+            _last_dot = (dot_total_df.iloc[-1]["DOT"] if len(dot_total_df)
+                         else (dot_df2.iloc[-1]["DOT"] if len(dot_df2) else 0))
             _summary_box(
                 f"{sel_single} 在所选区间净销量合计 {_tot_box} 盒，新患 {_np_total} 人；"
                 f"末月 R12M DOT 约 {_last_dot:.2f} 盒/人。"
